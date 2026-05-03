@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Safety Net ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isServerTimestamp(field) {
+      return field == request.time;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidMatch(data) {
+      return data.keys().hasAll(['status', 'capturePoints'])
+        && data.status in ['WAITING', 'ACTIVE', 'FINISHED']
+        && data.capturePoints is list
+        && data.capturePoints.size() <= 10
+        && (data.get('winner', null) == null || data.winner in ['NATO', 'MAFIA'])
+        && (!data.keys().hasAny(['lastUpdate']) || isServerTimestamp(data.lastUpdate));
+    }
+
+    function isValidPlayer(data) {
+      return data.keys().hasAll(['userId', 'name', 'team', 'x', 'y', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.name is string && data.name.size() <= 50
+        && data.team in ['NATO', 'MAFIA']
+        && data.x is number && data.y is number
+        && data.angle is number
+        && data.health is number && data.health >= 0
+        && data.maxHealth is number
+        && isServerTimestamp(data.updatedAt)
+        && data.keys().size() <= 20; // Prevent ghost fields
+    }
+
+    function isValidProjectile(data) {
+      return data.keys().hasAll(['ownerId', 'team', 'x', 'y', 'angle', 'timestamp'])
+        && data.ownerId == request.auth.uid
+        && data.team in ['NATO', 'MAFIA']
+        && data.x is number && data.y is number
+        && data.angle is number
+        && isServerTimestamp(data.timestamp)
+        && data.keys().size() <= 10;
+    }
+
+    function isValidDeployable(data) {
+      return data.keys().hasAll(['ownerId', 'team', 'type', 'x', 'y', 'timestamp'])
+        && data.ownerId == request.auth.uid
+        && data.team in ['NATO', 'MAFIA']
+        && data.type is string && data.type.size() <= 32
+        && data.x is number && data.y is number
+        && isServerTimestamp(data.timestamp)
+        && data.keys().size() <= 10;
+    }
+
+    function isValidUserStats(data) {
+      return data.keys().hasAll(['xp', 'level', 'updatedAt'])
+        && data.xp is number && data.xp >= 0
+        && data.level is number && data.level >= 1
+        && (!data.keys().hasAny(['unlockedWeapons']) || data.unlockedWeapons is list && data.unlockedWeapons.size() <= 100)
+        && (!data.keys().hasAny(['unlockedAttachments']) || data.unlockedAttachments is list && data.unlockedAttachments.size() <= 200)
+        && isServerTimestamp(data.updatedAt)
+        && data.keys().size() <= 10;
+    }
+
+    // --- Match Rules ---
+    match /matches/{matchId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && existing().status != 'FINISHED';
+      
+      allow create: if isSignedIn() 
+        && isValidId(matchId) 
+        && isValidMatch(incoming())
+        && (!incoming().keys().hasAny(['startTime']) || isServerTimestamp(incoming().startTime));
+
+      allow update: if isSignedIn()
+        && isValidMatch(incoming())
+        && (
+          // Action: Sync Capture Points or Game Status
+          incoming().diff(existing()).affectedKeys().hasAny(['capturePoints', 'status', 'winner', 'lastUpdate'])
+          && incoming().diff(existing()).affectedKeys().hasOnly(['capturePoints', 'status', 'winner', 'lastUpdate'])
+        );
+
+      // --- Players Subcollection ---
+      match /players/{playerId} {
+        allow get, list: if isSignedIn();
+        
+        allow create: if isSignedIn()
+          && isValidId(playerId)
+          && isOwner(playerId) // Player ID must be user UID
+          && isValidPlayer(incoming())
+          && get(/databases/$(database)/documents/matches/$(matchId)).data != null; // Relational Sync
+
+        allow update: if isSignedIn()
+          && isOwner(playerId)
+          && isValidPlayer(incoming())
+          && incoming().userId == existing().userId // Immutable field
+          && (
+            // Action: Movement & Health Sync
+            incoming().diff(existing()).affectedKeys().hasOnly(['x', 'y', 'angle', 'health', 'isDead', 'lastFired', 'isShooting', 'updatedAt', 'vehicleId'])
+          );
+
+        allow delete: if isSignedIn() && isOwner(playerId);
+      }
+
+      // --- Projectiles Subcollection ---
+      match /projectiles/{projectileId} {
+        allow list: if isSignedIn();
+        allow create: if isSignedIn()
+          && isValidProjectile(incoming())
+          && get(/databases/$(database)/documents/matches/$(matchId)).data != null;
+      }
+
+      // --- Deployables Subcollection ---
+      match /deployables/{deployableId} {
+        allow list: if isSignedIn();
+        allow create: if isSignedIn()
+          && isValidDeployable(incoming())
+          && get(/databases/$(database)/documents/matches/$(matchId)).data != null;
+        allow update: if isSignedIn()
+          && (incoming().ownerId == existing().ownerId || get(/databases/$(database)/documents/matches/$(matchId)).data != null)
+          && isValidDeployable(incoming())
+          && incoming().diff(existing()).affectedKeys().hasOnly(['health', 'timestamp']);
+        allow delete: if isSignedIn() && (isOwner(existing().ownerId));
+      }
+    }
+
+    // --- User Stats Rules ---
+    match /users/{userId}/stats/main {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && isValidUserStats(incoming());
+    }
+  }
+}

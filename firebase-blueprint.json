@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "Match": {
+      "title": "Match",
+      "description": "Represents a live game session.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["WAITING", "ACTIVE", "FINISHED"] },
+        "winner": { "type": "string", "enum": ["NATO", "MAFIA", null] },
+        "startTime": { "type": "string", "format": "date-time" },
+        "capturePoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "team": { "type": "string", "enum": ["NATO", "MAFIA", "NEUTRAL"] },
+              "progress": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["status", "capturePoints"]
+    },
+    "PlayerState": {
+      "title": "Player State",
+      "description": "Real-time state of a player in a match.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "team": { "type": "string", "enum": ["NATO", "MAFIA"] },
+        "classType": { "type": "string" },
+        "animalType": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "angle": { "type": "number" },
+        "health": { "type": "number" },
+        "maxHealth": { "type": "number" },
+        "isDead": { "type": "boolean" },
+        "lastFired": { "type": "number" },
+        "isShooting": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "team", "x", "y", "updatedAt"]
+    },
+    "Projectile": {
+      "title": "Projectile",
+      "description": "Short-lived event representing a fired shot.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "team": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "angle": { "type": "number" },
+        "damage": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "team", "x", "y", "angle", "timestamp"]
+    },
+    "Deployable": {
+      "title": "Deployable",
+      "description": "Object deployed by player (medkit, turret, mine).",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "team": { "type": "string" },
+        "type": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "health": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "team", "type", "x", "y", "timestamp"]
+    },
+    "UserStats": {
+      "title": "User Stats",
+      "description": "Persistent player progression and unlocks.",
+      "type": "object",
+      "properties": {
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "unlockedWeapons": { "type": "array", "items": { "type": "string" } },
+        "unlockedAttachments": { "type": "array", "items": { "type": "string" } },
+        "killsByWeapon": { "type": "object", "additionalProperties": { "type": "number" } },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["xp", "level", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/matches/{matchId}": {
+      "schema": "Match",
+      "description": "The main match document."
+    },
+    "/matches/{matchId}/players/{playerId}": {
+      "schema": "PlayerState",
+      "description": "Subcollection for active players in the match."
+    },
+    "/matches/{matchId}/projectiles/{projectileId}": {
+      "schema": "Projectile",
+      "description": "Subcollection for projectiles sent by players."
+    },
+    "/matches/{matchId}/deployables/{deployableId}": {
+      "schema": "Deployable",
+      "description": "Subcollection for objects deployed by players."
+    },
+    "/users/{userId}/stats/main": {
+      "schema": "UserStats",
+      "description": "Persistent stats for a user."
+    }
+  }
+}
